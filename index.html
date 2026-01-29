@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>נחש מי: אולימפוס פרו</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body { background: #0f172a; color: #f8fafc; font-family: 'Segoe UI', system-ui; text-align: center; margin: 0; }
+        .top { background: linear-gradient(135deg, #b89130, #927425); padding: 15px; border-bottom: 3px solid #fff; color: #1e293b; position: sticky; top: 0; z-index: 100; box-shadow: 0 5px 20px rgba(0,0,0,0.5); }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 15px; padding: 25px; max-width: 1000px; margin: auto; }
+        .card { background: #fff; color: #1e293b; border: 3px solid #b89130; border-radius: 12px; padding: 10px; cursor: pointer; transition: 0.3s; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+        .card.off { opacity: 0.1; transform: scale(0.8) translateY(10px); filter: grayscale(1); }
+        button, input, select { padding: 10px 15px; margin: 5px; border-radius: 8px; border: none; font-weight: bold; cursor: pointer; }
+        .btn-confirm { background: #1e293b; color: #fff; border: 2px solid #fff; }
+        .btn-guess { background: #16a34a; color: white; padding: 10px 25px; }
+        #end-screen { display:none; position:fixed; inset:0; background: rgba(0,0,0,0.95); z-index:2000; justify-content:center; align-items:center; flex-direction:column; }
+        #my-secret-display { color: #fde047; font-size: 1.4em; margin: 15px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div id="end-screen">
+    <h1 id="end-title" style="font-size: 5em; margin: 0;"></h1>
+    <p id="end-sub" style="font-size: 2em;"></p>
+    <button onclick="location.reload()" style="background:#b89130; color:white; padding:15px 40px; font-size:1.5em; margin-top:30px;">משחק חדש</button>
+</div>
+
+<div class="top">
+    <div id="setup">
+        קוד חדר: <b id="myId" style="color:white; font-size:1.3em;">...</b> | 
+        <input type="text" id="joinId" placeholder="הכנס קוד יריב">
+        <button onclick="join()">התחבר</button>
+    </div>
+    
+    <div id="gameUI" style="display:none">
+        בחר אל: <select id="sel"></select>
+        <button id="lockBtn" class="btn-confirm" onclick="lockSecret()">בחרתי!</button>
+        <button class="btn-guess" id="guessBtn" onclick="guess()" style="display:none;">אני יודע מי זה!</button>
+    </div>
+</div>
+
+<div id="status" style="margin:10px; color:#cbd5e1;">טוען...</div>
+<div id="my-secret-display"></div>
+<div class="grid" id="board"></div>
+
+<script>
+    // רשימת 30 אלים ודמויות
+    const gods = [
+        {n:"זאוס",i:"⚡"},{n:"הרה",i:"👑"},{n:"פוסידון",i:"🔱"},{n:"אתנה",i:"🦉"},{n:"ארס",i:"⚔️"},
+        {n:"אפרודיטה",i:"🕊️"},{n:"אפולו",i:"☀️"},{n:"ארטמיס",i:"🏹"},{n:"האדס",i:"💀"},{n:"הפיסטוס",i:"🔨"},
+        {n:"הרמס",i:"👟"},{n:"דיוניסוס",i:"🍇"},{n:"דמטר",i:"🌾"},{n:"הסטיה",i:"🔥"},{n:"פרומתאוס",i:"🕯️"},
+        {n:"פאן",i:"🐐"},{n:"פרסאוס",i:"🛡️"},{n:"הקאטי",i:"🌙"},{n:"ניקה",i:"🏆"},{n:"הליוס",i:"🌅"},
+        {n:"אטלס",i:"🌍"},{n:"קרונוס",i:"⏳"},{n:"ריאה",i:"🏔️"},{n:"הרקולס",i:"🦁"},{n:"אכילס",i:"🗡️"},
+        {n:"מדוזה",i:"🐍"},{n:"נרקיסוס",i:"🌷"},{n:"פנדורה",i:"📦"},{n:"איקרוס",i:"נ"},{n:"ארוס",i:"💘"}
+    ];
+
+    // סאונדים (משתמש בסינתזה של הדפדפן כדי לא להזדקק לקבצים חיצוניים)
+    const playSound = (type) => {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        
+        if(type === 'click') {
+            osc.frequency.setValueAtTime(150, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+            osc.start(); osc.stop(ctx.currentTime + 0.1);
+        } else if(type === 'win') {
+            [440, 554, 659].forEach((f, i) => {
+                const o = ctx.createOscillator(); o.connect(gain);
+                o.frequency.setValueAtTime(f, ctx.currentTime + i*0.1);
+                o.start(ctx.currentTime + i*0.1); o.stop(ctx.currentTime + 0.5);
+            });
+        } else if(type === 'fail') {
+            osc.frequency.setValueAtTime(100, ctx.currentTime);
+            osc.frequency.linearRampToValueAtTime(50, ctx.currentTime + 0.3);
+            gain.gain.fadeOut = 0.3;
+            osc.start(); osc.stop(ctx.currentTime + 0.3);
+        }
+    };
+
+    let peer, conn, mySecret = "", enemySecret = "";
+    const shortId = Math.floor(1000 + Math.random() * 9000).toString();
+    peer = new Peer(shortId);
+
+    peer.on('open', id => { document.getElementById('myId').innerText = id; });
+    peer.on('connection', c => { conn = c; setup(); });
+
+    function join() { conn = peer.connect(document.getElementById('joinId').value); setup(); }
+
+    function setup() {
+        conn.on('open', () => {
+            playSound('win');
+            document.getElementById('status').innerText = "מחובר! בחר דמות.";
+            document.getElementById('setup').style.display = "none";
+            document.getElementById('gameUI').style.display = "block";
+            render();
+        });
+        conn.on('data', d => {
+            if(d.type === 'secret') { enemySecret = d.value; document.getElementById('status').innerText = "היריב מוכן!"; }
+            if(d.type === 'gameOver') showEndScreen(false, d.yourGod);
+        });
+    }
+
+    function render() {
+        const b = document.getElementById('board'), s = document.getElementById('sel');
+        b.innerHTML = ''; s.innerHTML = '<option value="">--בחר דמות--</option>';
+        gods.sort((a,b)=>a.n.localeCompare(b.n)).forEach(g => {
+            s.innerHTML += `<option value="${g.n}">${g.n}</option>`;
+            const c = document.createElement('div');
+            c.className = 'card';
+            c.innerHTML = `<div style="font-size:35px">${g.i}</div><b>${g.n}</b>`;
+            c.onclick = () => { playSound('click'); c.classList.toggle('off'); };
+            b.appendChild(c);
+        });
+    }
+
+    function lockSecret() {
+        const v = document.getElementById('sel').value;
+        if(!v) return;
+        mySecret = v;
+        document.getElementById('my-secret-display').innerText = "הסוד שלך: " + v;
+        document.getElementById('lockBtn').style.display = "none";
+        document.getElementById('sel').disabled = true;
+        document.getElementById('guessBtn').style.display = "inline-block";
+        conn.send({type: 'secret', value: v});
+        playSound('win');
+    }
+
+    function guess() {
+        if(!enemySecret) return alert("היריב עוד לא בחר!");
+        const a = prompt("מי היריב?");
+        if(!a) return;
+        if(a.trim() === enemySecret) {
+            playSound('win');
+            conn.send({type: 'gameOver', yourGod: enemySecret});
+            showEndScreen(true);
+        } else {
+            playSound('fail');
+            alert("טעות!");
+        }
+    }
+
+    function showEndScreen(isWin, god) {
+        const screen = document.getElementById('end-screen');
+        screen.style.display = "flex";
+        if(isWin) {
+            document.getElementById('end-title').innerText = "ניצחת! 🎉";
+            document.getElementById('end-title').style.color = "#4ade80";
+            document.getElementById('end-sub').innerText = "אתה אלוף האולימפוס!";
+        } else {
+            document.getElementById('end-title').innerText = "הפסדת! 💀";
+            document.getElementById('end-title').style.color = "#f87171";
+            document.getElementById('end-sub').innerText = `היריב גילה שאתה ${god}`;
+        }
+    }
+</script>
+</body>
+</html>
