@@ -2,19 +2,23 @@
 <html lang="he" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>נחש מי: אולימפוס פרו</title>
+    <title>נחש מי: אולימפוס פרו - מהדורת הבוט</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body { background: #0f172a; color: #f8fafc; font-family: 'Segoe UI', system-ui; text-align: center; margin: 0; }
         .top { background: linear-gradient(135deg, #b89130, #927425); padding: 15px; border-bottom: 3px solid #fff; color: #1e293b; position: sticky; top: 0; z-index: 100; box-shadow: 0 5px 20px rgba(0,0,0,0.5); }
         .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 15px; padding: 25px; max-width: 1000px; margin: auto; }
-        .card { background: #fff; color: #1e293b; border: 3px solid #b89130; border-radius: 12px; padding: 10px; cursor: pointer; transition: 0.3s; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+        .card { background: #fff; color: #1e293b; border: 3px solid #b89130; border-radius: 12px; padding: 10px; cursor: pointer; transition: 0.3s; box-shadow: 0 4px 10px rgba(0,0,0,0.3); position: relative; }
         .card.off { opacity: 0.1; transform: scale(0.8) translateY(10px); filter: grayscale(1); }
         button, input, select { padding: 10px 15px; margin: 5px; border-radius: 8px; border: none; font-weight: bold; cursor: pointer; }
         .btn-confirm { background: #1e293b; color: #fff; border: 2px solid #fff; }
-        .btn-guess { background: #16a34a; color: white; padding: 10px 25px; }
+        .btn-bot { background: #7c3aed; color: white; }
+        .btn-guess { background: #16a34a; color: white; }
+        #chat-area { background: #1e293b; padding: 15px; border-radius: 10px; max-width: 600px; margin: 10px auto; display: none; }
         #end-screen { display:none; position:fixed; inset:0; background: rgba(0,0,0,0.95); z-index:2000; justify-content:center; align-items:center; flex-direction:column; }
-        #my-secret-display { color: #fde047; font-size: 1.4em; margin: 15px; font-weight: bold; }
+        #my-secret-display { color: #fde047; font-size: 1.2em; margin: 10px; font-weight: bold; }
+        .msg { margin: 5px; padding: 8px; border-radius: 5px; text-align: right; }
+        .bot-msg { background: #334155; border-right: 4px solid #b89130; }
     </style>
 </head>
 <body>
@@ -27,66 +31,95 @@
 
 <div class="top">
     <div id="setup">
-        קוד חדר: <b id="myId" style="color:white; font-size:1.3em;">...</b> | 
-        <input type="text" id="joinId" placeholder="הכנס קוד יריב">
+        <button class="btn-bot" onclick="startBotGame()">🤖 משחק נגד בוט</button>
+        <span style="margin: 0 15px;">או</span>
+        קוד חדר: <b id="myId" style="color:white;">...</b>
+        <input type="text" id="joinId" placeholder="קוד יריב" style="width:80px">
         <button onclick="join()">התחבר</button>
     </div>
     
     <div id="gameUI" style="display:none">
-        בחר אל: <select id="sel"></select>
-        <button id="lockBtn" class="btn-confirm" onclick="lockSecret()">בחרתי!</button>
+        בחר את הדמות שלך: <select id="sel"></select>
+        <button id="lockBtn" class="btn-confirm" onclick="lockSecret()">אני בוחר בזה!</button>
         <button class="btn-guess" id="guessBtn" onclick="guess()" style="display:none;">אני יודע מי זה!</button>
     </div>
 </div>
 
-<div id="status" style="margin:10px; color:#cbd5e1;">טוען...</div>
+<div id="status" style="margin:10px; color:#cbd5e1;">בחר מצב משחק כדי להתחיל</div>
 <div id="my-secret-display"></div>
+
+<div id="chat-area">
+    <div id="chat-history" style="height: 100px; overflow-y: auto; margin-bottom: 10px; font-size: 0.9em;"></div>
+    <input type="text" id="questionInput" placeholder="שאל שאלה (למשל: האם יש לך נשק?)" style="width: 70%;">
+    <button onclick="askQuestion()">שאל</button>
+</div>
+
 <div class="grid" id="board"></div>
 
 <script>
-    // רשימת 30 אלים ודמויות
+    // רשימת אלים עם תגיות לזיהוי ע"י הבוט
     const gods = [
-        {n:"זאוס",i:"⚡"},{n:"הרה",i:"👑"},{n:"פוסידון",i:"🔱"},{n:"אתנה",i:"🦉"},{n:"ארס",i:"⚔️"},
-        {n:"אפרודיטה",i:"🕊️"},{n:"אפולו",i:"☀️"},{n:"ארטמיס",i:"🏹"},{n:"האדס",i:"💀"},{n:"הפיסטוס",i:"🔨"},
-        {n:"הרמס",i:"👟"},{n:"דיוניסוס",i:"🍇"},{n:"דמטר",i:"🌾"},{n:"הסטיה",i:"🔥"},{n:"פרומתאוס",i:"🕯️"},
-        {n:"פאן",i:"🐐"},{n:"פרסאוס",i:"🛡️"},{n:"הקאטי",i:"🌙"},{n:"ניקה",i:"🏆"},{n:"הליוס",i:"🌅"},
-        {n:"אטלס",i:"🌍"},{n:"קרונוס",i:"⏳"},{n:"ריאה",i:"🏔️"},{n:"הרקולס",i:"🦁"},{n:"אכילס",i:"🗡️"},
-        {n:"מדוזה",i:"🐍"},{n:"נרקיסוס",i:"🌷"},{n:"פנדורה",i:"📦"},{n:"איקרוס",i:"נ"},{n:"ארוס",i:"💘"}
+        {n:"זאוס",i:"⚡", t:["זכר","אל","ברק","שמיים","מלך","זקן"]},
+        {n:"הרה",i:"👑", t:["נקבה","אלה","מלכה","נישואין"]},
+        {n:"פוסידון",i:"🔱", t:["זכר","אל","ים","מים","קלשון","סוס"]},
+        {n:"אתנה",i:"🦉", t:["נקבה","אלה","חכמה","מלחמה","קסדה","ינשוף"]},
+        {n:"ארס",i:"⚔️", t:["זכר","אל","מלחמה","חרב","נשק"]},
+        {n:"אפרודיטה",i:"🕊️", t:["נקבה","אלה","יופי","אהבה","יונה"]},
+        {n:"אפולו",i:"☀️", t:["זכר","אל","שמש","מוזיקה","נבואה"]},
+        {n:"ארטמיס",i:"🏹", t:["נקבה","אלה","ציד","ירח","קשת"]},
+        {n:"האדס",i:"💀", t:["זכר","אל","שאול","מוות","זהב"]},
+        {n:"הפיסטוס",i:"🔨", t:["זכר","אל","אש","נפחות","פטיש"]},
+        {n:"הרמס",i:"👟", t:["זכר","אל","מהירות","שליח","נעליים"]},
+        {n:"דיוניסוס",i:"🍇", t:["זכר","אל","יין","מסיבה"]},
+        {n:"דמטר",i:"🌾", t:["נקבה","אלה","אדמה","חקלאות"]},
+        {n:"הסטיה",i:"🔥", t:["נקבה","אלה","בית","אש"]},
+        {n:"פרומתאוס",i:"🕯️", t:["זכר","טיטאן","אש","אדם"]},
+        {n:"פאן",i:"🐐", t:["זכר","אל","טבע","חליל","עז"]},
+        {n:"פרסאוס",i:"🛡️", t:["זכר","גיבור","ראש","מדוזה"]},
+        {n:"הקאטי",i:"🌙", t:["נקבה","אלה","קסם","לילה"]},
+        {n:"ניקה",i:"🏆", t:["נקבה","אלה","ניצחון","כנפיים"]},
+        {n:"הליוס",i:"🌅", t:["זכר","טיטאן","שמש","מרכבה"]},
+        {n:"אטלס",i:"🌍", t:["זכר","טיטאן","עולם","כדור"]},
+        {n:"קרונוס",i:"⏳", t:["זכר","טיטאן","זמן","חרמש"]},
+        {n:"ריאה",i:"🏔️", t:["נקבה","טיטאנית","אמא"]},
+        {n:"הרקולס",i:"🦁", t:["זכר","גיבור","כוח","אריה"]},
+        {n:"אכילס",i:"🗡️", t:["זכר","גיבור","עקב","מלחמה"]},
+        {n:"מדוזה",i:"🐍", t:["נקבה","מפלצת","נחשים","עיניים"]},
+        {n:"נרקיסוס",i:"🌷", t:["זכר","פרח","יופי"]},
+        {n:"פנדורה",i:"📦", t:["נקבה","תיבה","סקרנות"]},
+        {n:"איקרוס",i:"🪽", t:["זכר","כנפיים","שמש"]},
+        {n:"ארוס",i:"💘", t:["זכר","אהבה","קשת"]}
     ];
 
-    // סאונדים (משתמש בסינתזה של הדפדפן כדי לא להזדקק לקבצים חיצוניים)
+    let peer, conn, mySecret = "", enemySecret = "", isBot = false;
+    let botOptions = [...gods];
+
     const playSound = (type) => {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain); gain.connect(ctx.destination);
-        
-        if(type === 'click') {
-            osc.frequency.setValueAtTime(150, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
-            osc.start(); osc.stop(ctx.currentTime + 0.1);
-        } else if(type === 'win') {
-            [440, 554, 659].forEach((f, i) => {
-                const o = ctx.createOscillator(); o.connect(gain);
-                o.frequency.setValueAtTime(f, ctx.currentTime + i*0.1);
-                o.start(ctx.currentTime + i*0.1); o.stop(ctx.currentTime + 0.5);
-            });
-        } else if(type === 'fail') {
-            osc.frequency.setValueAtTime(100, ctx.currentTime);
-            osc.frequency.linearRampToValueAtTime(50, ctx.currentTime + 0.3);
-            gain.gain.fadeOut = 0.3;
-            osc.start(); osc.stop(ctx.currentTime + 0.3);
-        }
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            if(type === 'click') { osc.frequency.setValueAtTime(150, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1); osc.start(); osc.stop(ctx.currentTime + 0.1); }
+            else if(type === 'win') { [440, 554, 659].forEach((f, i) => { const o = ctx.createOscillator(); o.connect(gain); o.frequency.setValueAtTime(f, ctx.currentTime + i*0.1); o.start(ctx.currentTime + i*0.1); o.stop(ctx.currentTime + 0.5); }); }
+        } catch(e) {}
     };
 
-    let peer, conn, mySecret = "", enemySecret = "";
     const shortId = Math.floor(1000 + Math.random() * 9000).toString();
     peer = new Peer(shortId);
-
     peer.on('open', id => { document.getElementById('myId').innerText = id; });
-    peer.on('connection', c => { conn = c; setup(); });
+    peer.on('connection', c => { conn = c; isBot = false; setup(); });
 
-    function join() { conn = peer.connect(document.getElementById('joinId').value); setup(); }
+    function startBotGame() {
+        isBot = true;
+        enemySecret = gods[Math.floor(Math.random() * gods.length)].n;
+        document.getElementById('setup').style.display = "none";
+        document.getElementById('gameUI').style.display = "block";
+        document.getElementById('status').innerText = "משחק נגד הבוט! בחר את הדמות שלך.";
+        render();
+    }
+
+    function join() { conn = peer.connect(document.getElementById('joinId').value); isBot = false; setup(); }
 
     function setup() {
         conn.on('open', () => {
@@ -104,7 +137,7 @@
 
     function render() {
         const b = document.getElementById('board'), s = document.getElementById('sel');
-        b.innerHTML = ''; s.innerHTML = '<option value="">--בחר דמות--</option>';
+        b.innerHTML = ''; s.innerHTML = '<option value="">--בחר--</option>';
         gods.sort((a,b)=>a.n.localeCompare(b.n)).forEach(g => {
             s.innerHTML += `<option value="${g.n}">${g.n}</option>`;
             const c = document.createElement('div');
@@ -123,21 +156,77 @@
         document.getElementById('lockBtn').style.display = "none";
         document.getElementById('sel').disabled = true;
         document.getElementById('guessBtn').style.display = "inline-block";
-        conn.send({type: 'secret', value: v});
+        if(isBot) {
+            document.getElementById('chat-area').style.display = "block";
+            document.getElementById('status').innerText = "תורך לשאול את הבוט!";
+        } else {
+            conn.send({type: 'secret', value: v});
+        }
         playSound('win');
     }
 
+    // לוגיקת הבוט - מענה על שאלות חופשיות
+    function askQuestion() {
+        const input = document.getElementById('questionInput');
+        const q = input.value.trim();
+        if(!q) return;
+
+        addChatMessage("אתה: " + q);
+        input.value = "";
+
+        setTimeout(() => {
+            const secretObj = gods.find(g => g.n === enemySecret);
+            let answer = "אני לא בטוח למה התכוונת, נסה לשאול על מגדר, נשק או אלמנט.";
+            
+            // בדיקת מילות מפתח בתגיות
+            const matchedTag = secretObj.t.find(tag => q.includes(tag));
+            
+            if(q.includes("זכר") || q.includes("בן")) answer = secretObj.t.includes("זכר") ? "כן, אני זכר." : "לא, אני נקבה.";
+            else if(q.includes("נקבה") || q.includes("בת")) answer = secretObj.t.includes("נקבה") ? "כן, אני נקבה." : "לא, אני זכר.";
+            else if(matchedTag) answer = "כן!";
+            else answer = "לא.";
+
+            addChatMessage("בוט: " + answer, true);
+            botTurn();
+        }, 600);
+    }
+
+    function botTurn() {
+        setTimeout(() => {
+            // הבוט "מצמצם" אפשרויות (סימולציה)
+            if(Math.random() > 0.8) {
+                const botGuess = gods[Math.floor(Math.random() * gods.length)].n;
+                addChatMessage(`בוט: האם אתה ${botGuess}?`, true);
+                if(botGuess === mySecret) {
+                    showEndScreen(false, botGuess);
+                } else {
+                    addChatMessage(`בוט: אוף, טעיתי...`);
+                }
+            } else {
+                addChatMessage("בוט: מעניין... תורך שוב.", true);
+            }
+        }, 1000);
+    }
+
+    function addChatMessage(msg, isBotMsg = false) {
+        const hist = document.getElementById('chat-history');
+        const div = document.createElement('div');
+        div.className = 'msg' + (isBotMsg ? ' bot-msg' : '');
+        div.innerText = msg;
+        hist.appendChild(div);
+        hist.scrollTop = hist.scrollHeight;
+    }
+
     function guess() {
-        if(!enemySecret) return alert("היריב עוד לא בחר!");
-        const a = prompt("מי היריב?");
+        const a = prompt("מי הדמות של היריב?");
         if(!a) return;
         if(a.trim() === enemySecret) {
             playSound('win');
-            conn.send({type: 'gameOver', yourGod: enemySecret});
+            if(!isBot) conn.send({type: 'gameOver', yourGod: enemySecret});
             showEndScreen(true);
         } else {
-            playSound('fail');
-            alert("טעות!");
+            alert("טעות! נסה שוב בתור הבא.");
+            if(isBot) botTurn();
         }
     }
 
@@ -146,12 +235,10 @@
         screen.style.display = "flex";
         if(isWin) {
             document.getElementById('end-title').innerText = "ניצחת! 🎉";
-            document.getElementById('end-title').style.color = "#4ade80";
-            document.getElementById('end-sub').innerText = "אתה אלוף האולימפוס!";
+            document.getElementById('end-sub').innerText = "הבוט לא הצליח לעצור אותך!";
         } else {
             document.getElementById('end-title').innerText = "הפסדת! 💀";
-            document.getElementById('end-title').style.color = "#f87171";
-            document.getElementById('end-sub').innerText = `היריב גילה שאתה ${god}`;
+            document.getElementById('end-sub').innerText = `הבוט גילה שאתה ${god}`;
         }
     }
 </script>
